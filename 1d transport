@@ -1,0 +1,180 @@
+clc
+clear
+
+%% Inputs
+L = input('Enter the length (L): ');
+Nx = input('Enter Nx: ');
+S = input('Enter S: ');
+
+% Enter tow as an array
+tow = zeros(1, Nx+1);
+for i = 1:Nx+1
+    tow(i) = input(['Enter the value of tow(', num2str(i), '): ']);
+end
+
+X_node = linspace(0, L, Nx+1);
+
+%% Generate coordinates of elements
+X = (X_node(1:Nx) + X_node(2:Nx+1)) / 2;
+
+%% Compute volume of elements
+volume = diff(X_node);
+
+%% Compute distances
+df = diff(X_node);
+
+%% Compute gf
+g = zeros(1, Nx+1);
+g(1) = 1;
+g(Nx+1) = 1;
+g(2:Nx) = diff(X(1:Nx-1)) ./ diff(X);
+
+%% Compute towf
+towf = zeros(1, Nx+1);
+towf(1) = tow(1);
+towf(Nx+1) = tow(Nx+1);
+for i = 2:Nx
+    m = input('Enter the type of mean (0 if arithmetic & 1 if harmonic) m= ');
+    if m == 0 % arithmetic
+        towf(i) = (1 - g(i)) * tow(i-1) + g(i) * tow(i);
+    elseif m == 1 % harmonic
+        towf(i) = 1 / (((1 - g(i)) / tow(i)) + (g(i) / tow(i-1)));
+    end
+end
+
+% ... (rest of the code remains unchanged)
+
+
+%% Boundary Condition
+
+%% Element 1
+bc_1 = input('Enter the type of boundary condition on face 1 (1: Dirichlet, 2: Von Neumann, 3: Mixed): ');
+
+phi_b1 = 0;
+if bc_1 == 1 % Dirichlet
+    phi_b1 = input('Enter the value of phi_b1: ');
+    a_bc1 = towf(1) / df(1);
+    b_bc1 = a_bc1 * phi_b1;
+elseif bc_1 == 2 % Von Neumann
+    q_b1 = input('Enter the value of q_b1: ');
+    a_bc1 = 0;
+    b_bc1 = -q_b1;
+elseif bc_1 == 3 % Mixed
+    hin = input('Enter the value of hin: ');
+    Qin = input('Enter the value of Qin: ');
+    R_eq1 = ((hin * towf(1)) / df(1)) / (hin + (towf(1) / df(1)));
+    a_bc1 = R_eq1;
+    b_bc1 = R_eq1 * Qin;
+end
+
+%% Last element
+bc_Nx = input('Enter the type of boundary condition on face Nx+1 (1: Dirichlet, 2: Von Neumann, 3: Mixed): ');
+phi_bNx = 0;
+if bc_Nx == 1 % Dirichlet
+    phi_bNx = input('Enter the value of phi_bNx: ');
+    a_bcNx = towf(Nx+1) / df(Nx+1);
+    b_bcNx = a_bcNx * phi_bNx;
+elseif bc_Nx == 2 % Von Neumann
+    q_bNx = input('Enter the value of q_bNx: ');
+    a_bcNx = 0;
+    b_bcNx = -q_bNx;
+elseif bc_Nx == 3 % Mixed
+    hin = input('Enter the value of hin: ');
+    Qin = input('Enter the value of Qin: ');
+    R_eqNx = ((hin * towf(Nx)) / df(Nx)) / (hin + (towf(Nx) / df(Nx)));
+    a_bcNx = R_eqNx;
+    b_bcNx = R_eqNx * Qin;
+end
+
+%% Iteration
+A = zeros(Nx);
+b = zeros(Nx, 1);
+
+for i = 1
+    A(i, i) = (towf(i+1) / df(i+1)) + a_bc1;
+    A(i, i+1) = -towf(i+1) / df(i+1);
+    b(i) = S * volume(i) + b_bc1;
+end
+
+for i = 2:Nx-1
+    A(i, i) = (towf(i) / df(i)) + (towf(i+1) / df(i+1));
+    A(i, i-1) = -towf(i) / df(i);
+    A(i, i+1) = -towf(i+1) / df(i+1);
+    b(i) = S * volume(i);
+end
+
+for i = Nx
+    A(i, i) = (towf(i) / df(i)) + a_bcNx;
+    A(i, i-1) = -towf(i) / df(i);
+    b(i) = S * volume(i) + b_bcNx;
+end
+
+%% Transient
+density = input('Enter the value of density: ');
+transient_form = 1;
+Total_time = input('Enter the value of total time: ');
+delta_t = input('Enter the value of Delta time: ');
+time_steps = Total_time / delta_t;
+initial_value = input('Enter the value of initial value: ');
+
+% Check stability condition
+K = (delta_t * tow) ./ (density * df.^2);
+if max(K) > 0.5
+    disp('Error: Stability condition not met. Choose a smaller time step.');
+else
+    % Backward Euler method
+    phi = zeros(Nx, time_steps+1);
+    phi(:, 1) = initial_value;
+
+    for it = 1:time_steps
+        % Set up the system of equations for Backward Euler
+        fun = @(x) x - phi(:, it) - delta_t * (A * x - b) / density;
+
+        % Solve the system using fsolve
+        phi(:, it + 1) = fsolve(fun, phi(:, it));
+
+        % Display debugging information
+        disp(['Time Step: ', num2str(it), ' | Residual: ', num2str(norm(fun(phi(:, it + 1))))]);
+    end
+
+    % Display completion message
+    disp('Backward Euler method completed.');
+
+    % Calculate transient values
+    phif_transient = zeros(Nx+1, time_steps);
+    phif_transient(1,:) = phi_b1;
+    phif_transient(Nx+1,:) = phi_bNx;
+
+    for it = 1:time_steps
+        if bc_1 == 2
+            phi_b1 = phi(1,it) - (((df(1)) / towf(1)) * q_b1);
+        elseif bc_1 == 3
+            phi_b1 = (((towf(1) / df(1)) * phi(1,it)) + (hin * Qin)) / ((towf(1) / df(1)) + hin);
+        end
+
+        if bc_Nx == 2
+            phi_bNx = phi(Nx,it) - (((df(Nx+1)) / towf(Nx+1)) * q_bNx);
+        elseif bc_Nx == 3
+            phi_bNx = (((towf(Nx+1) / df(Nx+1)) * phi(Nx,it)) + (hin * Qin)) / ((towf(Nx+1) / df(Nx+1)) + hin);
+        end
+
+        % Update boundary conditions in the matrix
+        phif_transient(1,it) = phi_b1;
+        phif_transient(Nx+1,it) = phi_bNx;
+
+        % Calculate transient values in the interior faces
+        for i = 2:Nx
+            phif_transient(i,it) = (1 - g(i)) * phi(i-1,it) + g(i) * phi(i,it);
+        end
+
+        % Calculating the fluxes on faces
+        qf_transient = zeros(1, Nx+1);
+        qf_transient(1) = -towf(1) * ((phi(1,it) - phif_transient(1,it)) / df(1));
+        for i = 2:Nx
+            qf_transient(i) = -towf(i) * ((phi(i,it) - phi(i-1,it)) / df(i));
+        end
+        qf_transient(Nx+1) = -towf(Nx+1) * ((phif_transient(Nx+1,it) - phi(Nx,it)) / df(Nx+1));
+    end
+end
+
+disp('Code execution completed.');
